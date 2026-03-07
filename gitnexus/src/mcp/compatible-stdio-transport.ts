@@ -1,4 +1,5 @@
 import process from 'node:process';
+import type { Transport, TransportSendOptions } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { JSONRPCMessageSchema, type JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 
 export type StdioFraming = 'content-length' | 'newline';
@@ -35,7 +36,7 @@ function looksLikeContentLength(buffer: Buffer): boolean {
   return /^content-length\s*:/i.test(probe) || 'content-length'.startsWith(probe.toLowerCase());
 }
 
-export class CompatibleStdioServerTransport {
+export class CompatibleStdioServerTransport implements Transport {
   private _readBuffer: Buffer | undefined;
   private _started = false;
   private _framing: StdioFraming | null = null;
@@ -85,6 +86,11 @@ export class CompatibleStdioServerTransport {
     return null;
   }
 
+  private discardBufferedInput() {
+    this._readBuffer = undefined;
+    this._framing = null;
+  }
+
   private readContentLengthMessage(): JSONRPCMessage | null {
     if (!this._readBuffer) {
       return null;
@@ -101,10 +107,15 @@ export class CompatibleStdioServerTransport {
       .replace(/\r/g, '\n');
     const match = headerText.match(/(?:^|\n)content-length\s*:\s*(\d+)/i);
     if (!match) {
+      this.discardBufferedInput();
       throw new Error('Missing Content-Length header from MCP client');
     }
 
     const contentLength = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(contentLength) || contentLength < 0) {
+      this.discardBufferedInput();
+      throw new Error('Invalid Content-Length header from MCP client');
+    }
     const bodyStart = header.index + header.separatorLength;
     const bodyEnd = bodyStart + contentLength;
     if (this._readBuffer.length < bodyEnd) {
@@ -154,6 +165,9 @@ export class CompatibleStdioServerTransport {
 
   private processReadBuffer() {
     while (true) {
+      const bufferBefore = this._readBuffer;
+      const lengthBefore = bufferBefore?.length ?? 0;
+
       try {
         const message = this.readMessage();
         if (message === null) {
@@ -162,6 +176,11 @@ export class CompatibleStdioServerTransport {
         this.onmessage?.(message);
       } catch (error) {
         this.onerror?.(error as Error);
+
+        const lengthAfter = this._readBuffer?.length ?? 0;
+        if (this._readBuffer === bufferBefore && lengthAfter == lengthBefore) {
+          break;
+        }
       }
     }
   }
@@ -179,7 +198,7 @@ export class CompatibleStdioServerTransport {
     this.onclose?.();
   }
 
-  send(message: JSONRPCMessage) {
+  send(message: JSONRPCMessage, _options?: TransportSendOptions) {
     return new Promise<void>((resolve) => {
       const payload = this._framing === 'newline'
         ? serializeNewlineMessage(message)
