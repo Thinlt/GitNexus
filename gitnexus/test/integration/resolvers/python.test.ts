@@ -986,9 +986,10 @@ describe('Python match/case as-pattern type binding', () => {
     expect(true).toBe(true);
   });
 
-  // Skip: tree-sitter-python match_statement call extraction needs query updates
-  // Type-env binding works (unit test passes), but calls inside case_clause blocks
-  // are not captured by the current call extraction queries.
+  // Skip: call extraction issue, NOT a type-env limitation.
+  // Type-env binding works correctly (unit test passes). The root cause is likely
+  // in call-processor's findEnclosingFunction scope resolution within match_statement
+  // blocks, not the tree-sitter query patterns (which descend recursively by default).
   it.skip('resolves u.save() to User#save via match/case as-pattern binding', () => {
     const calls = getRelationships(result, 'CALLS');
     const userSave = calls.find(c =>
