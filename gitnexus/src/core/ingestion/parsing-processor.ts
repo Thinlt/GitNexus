@@ -5,7 +5,7 @@ import { LANGUAGE_QUERIES } from './tree-sitter-queries.js';
 import { generateId } from '../../lib/utils.js';
 import { SymbolTable } from './symbol-table.js';
 import { ASTCache } from './ast-cache.js';
-import { getLanguageFromFilename, yieldToEventLoop, getDefinitionNodeFromCaptures, findEnclosingClassId, extractMethodSignature } from './utils.js';
+import { getLanguageFromFilename, yieldToEventLoop, getDefinitionNodeFromCaptures, findEnclosingClassId, extractMethodSignature, isVerboseIngestionEnabled } from './utils.js';
 import { extractPropertyDeclaredType } from './type-extractors/shared.js';
 import { isNodeExported } from './export-detection.js';
 import { detectFrameworkFromAST } from './framework-detection.js';
@@ -158,6 +158,8 @@ const processParsingSequential = async (
       continue;  // parser unavailable — safety net
     }
 
+    const verbose = isVerboseIngestionEnabled();
+    if (verbose) console.log(`  [Parsing] ${file.path}`);
     let tree;
     try {
       tree = parser.parse(file.content, undefined, { bufferSize: getTreeSitterBufferSize(file.content.length) });
@@ -176,6 +178,7 @@ const processParsingSequential = async (
     let query;
     let matches;
     try {
+      if (verbose) console.log(`  [Matching] ${file.path}`);
       const language = parser.getLanguage();
       query = new Parser.Query(language, queryString);
       matches = query.matches(tree.rootNode);

@@ -1,4 +1,4 @@
-import { parentPort } from 'node:worker_threads';
+import { parentPort, threadId } from 'node:worker_threads';
 import Parser from 'tree-sitter';
 import JavaScript from 'tree-sitter-javascript';
 import TypeScript from 'tree-sitter-typescript';
@@ -38,6 +38,7 @@ import {
   extractReceiverNode,
   extractMixedChain,
   type MixedChainStep,
+  isVerboseIngestionEnabled,
 } from '../utils.js';
 import { buildTypeEnv } from '../type-env.js';
 import type { ConstructorBinding } from '../type-env.js';
@@ -879,6 +880,8 @@ const processFileGroup = (
     // Skip files larger than the max tree-sitter buffer (32 MB)
     if (file.content.length > TREE_SITTER_MAX_BUFFER) continue;
 
+    const verbose = isVerboseIngestionEnabled();
+    if (verbose) console.log(`  [Worker ${threadId} Parsing] ${file.path}`);
     let tree;
     try {
       tree = parser.parse(file.content, undefined, { bufferSize: getTreeSitterBufferSize(file.content.length) });
@@ -901,6 +904,7 @@ const processFileGroup = (
 
     let matches;
     try {
+      if (verbose) console.log(`  [Worker ${threadId} Matching] ${file.path}`);
       matches = query.matches(tree.rootNode);
     } catch (err) {
       console.warn(`Query execution failed for ${file.path}: ${err instanceof Error ? err.message : String(err)}`);
@@ -1247,6 +1251,8 @@ const processFileGroup = (
       const extractedRoutes = extractLaravelRoutes(tree, file.path);
       result.routes.push(...extractedRoutes);
     }
+
+    if (verbose) console.log(`  [Worker ${threadId} Finished] ${file.path}`);
   }
 };
 

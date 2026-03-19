@@ -22,11 +22,11 @@ export interface WorkerPool {
  * Max files to send to a worker in a single postMessage.
  * Keeps structured-clone memory bounded per sub-batch.
  */
-const SUB_BATCH_SIZE = 1500;
+const SUB_BATCH_SIZE = 100;
 
 /** Per sub-batch timeout. If a single sub-batch takes longer than this,
  *  likely a pathological file (e.g. minified 50MB JS). Fail fast. */
-const SUB_BATCH_TIMEOUT_MS = 30_000;
+const SUB_BATCH_TIMEOUT_MS = 60000;
 
 /**
  * Create a pool of worker threads.
