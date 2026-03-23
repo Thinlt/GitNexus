@@ -13,6 +13,7 @@ import { FileEntry } from './services/zip';
 import { getActiveProviderConfig } from './core/llm/settings-service';
 import { createKnowledgeGraph } from './core/graph/graph';
 import { connectToServer, fetchRepos, normalizeServerUrl, type ConnectToServerResult } from './services/server-connection';
+import { HelpPanel } from './components/HelpPanel';
 
 const AppContent = () => {
   const {
@@ -28,6 +29,8 @@ const AppContent = () => {
     runPipelineFromFiles,
     isSettingsPanelOpen,
     setSettingsPanelOpen,
+    isHelpDialogBoxOpen,
+    setHelpDialogBoxOpen,
     refreshLLMSettings,
     initializeAgent,
     startEmbeddings,
@@ -40,7 +43,8 @@ const AppContent = () => {
     availableRepos,
     setAvailableRepos,
     switchRepo,
-    hydrateWorkerFromServer,
+    loadServerGraph,
+    graph
   } = useAppState();
 
   const graphCanvasRef = useRef<GraphCanvasHandle>(null);
@@ -133,13 +137,13 @@ const AppContent = () => {
     }
   }, [setViewMode, setGraph, setFileContents, setProgress, setProjectName, runPipelineFromFiles, startEmbeddings, initializeAgent]);
 
-  const handleServerConnect = useCallback((result: ConnectToServerResult) => {
+  const handleServerConnect = useCallback((result: ConnectToServerResult): Promise<void> => {
     // Extract project name from repoPath
     const repoPath = result.repoInfo.repoPath;
     const projectName = repoPath.split('/').pop() || 'server-project';
     setProjectName(projectName);
 
-    // Build KnowledgeGraph from server data (bypasses WASM pipeline entirely)
+    // Build KnowledgeGraph from server data for visualization
     const graph = createKnowledgeGraph();
     for (const node of result.nodes) {
       graph.addNode(node);
@@ -158,31 +162,31 @@ const AppContent = () => {
 
     // Transition directly to exploring view
     setViewMode('exploring');
-    setProgress(null);
 
-    // Hydrate the worker-side DB (LadybugDB + BM25) so Query/Processes/embeddings work
-    hydrateWorkerFromServer(result.nodes, result.relationships, result.fileContents).then(() => {
-      // Initialize agent if LLM is configured
-      if (getActiveProviderConfig()) {
-        initializeAgent(projectName);
-      }
-
-      // Auto-start embeddings (now that LadybugDB is ready)
-      startEmbeddings().catch((err) => {
-        if (err?.name === 'WebGPUNotAvailableError' || err?.message?.includes('WebGPU')) {
-          startEmbeddings('wasm').catch(console.warn);
-        } else {
-          console.warn('Embeddings auto-start failed:', err);
+    // Load graph into LadybugDB (in-browser WASM database) for Nexus AI queries,
+    // then initialize agent once the database is ready
+    const loadGraphPromise = loadServerGraph(result.nodes, result.relationships, result.fileContents)
+      .then(() => {
+        if (getActiveProviderConfig()) {
+          return initializeAgent(projectName);
         }
+      })
+      .then(() => {
+        startEmbeddings().catch((err) => {
+          if (err?.name === 'WebGPUNotAvailableError' || err?.message?.includes('WebGPU')) {
+            startEmbeddings('wasm').catch(console.warn);
+          } else {
+            console.warn('Embeddings auto-start failed:', err);
+          }
+        });
+      })
+      .catch((err) => {
+        console.warn('Failed to load graph into LadybugDB:', err);
+        // Agent won't work but graph visualization still does
       });
-    }).catch((err) => {
-      console.warn('Worker hydration failed (non-fatal):', err);
-      // Still initialize agent even if hydration fails
-      if (getActiveProviderConfig()) {
-        initializeAgent(projectName);
-      }
-    });
-  }, [setViewMode, setGraph, setFileContents, setProjectName, setProgress, initializeAgent, startEmbeddings, hydrateWorkerFromServer]);
+
+    return loadGraphPromise;
+  }, [setViewMode, setGraph, setFileContents, setProjectName, loadServerGraph, initializeAgent, startEmbeddings]);
 
   // Auto-connect when ?server query param is present (bookmarkable shortcut)
   const autoConnectRan = useRef(false);
@@ -214,16 +218,12 @@ const AppContent = () => {
         setProgress({ phase: 'extracting', percent: 97, message: 'Processing...', detail: 'Extracting file contents' });
       }
     }).then(async (result) => {
-      handleServerConnect(result);
-
-      // Store server URL and fetch available repos for the repo switcher
+      await handleServerConnect(result);
+      setProgress(null);
       setServerBaseUrl(baseUrl);
-      try {
-        const repos = await fetchRepos(baseUrl);
-        setAvailableRepos(repos);
-      } catch (e) {
-        console.warn('Failed to fetch repo list:', e);
-      }
+      fetchRepos(baseUrl)
+        .then((repos) => setAvailableRepos(repos))
+        .catch((e) => console.warn('Failed to fetch repo list:', e));
     }).catch((err) => {
       console.error('Auto-connect failed:', err);
       setProgress({
@@ -257,16 +257,14 @@ const AppContent = () => {
         onFileSelect={handleFileSelect}
         onGitClone={handleGitClone}
         onServerConnect={async (result, serverUrl) => {
-          handleServerConnect(result);
+          await handleServerConnect(result);
+          setProgress(null);
           if (serverUrl) {
             const baseUrl = normalizeServerUrl(serverUrl);
             setServerBaseUrl(baseUrl);
-            try {
-              const repos = await fetchRepos(baseUrl);
-              setAvailableRepos(repos);
-            } catch (e) {
-              console.warn('Failed to fetch repo list:', e);
-            }
+            fetchRepos(baseUrl)
+              .then((repos) => setAvailableRepos(repos))
+              .catch((e) => console.warn('Failed to fetch repo list:', e));
           }
         }}
       />
@@ -309,6 +307,13 @@ const AppContent = () => {
         isOpen={isSettingsPanelOpen}
         onClose={() => setSettingsPanelOpen(false)}
         onSettingsSaved={handleSettingsSaved}
+      />
+
+      <HelpPanel
+          isOpen={isHelpDialogBoxOpen}
+          onClose={() => setHelpDialogBoxOpen(false)}
+          nodeCount={graph!.nodes.length}
+          edgeCount={graph!.relationships.length}
       />
 
     </div>

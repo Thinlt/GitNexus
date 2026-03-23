@@ -26,6 +26,9 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle>((_, ref) => {
     blastRadiusNodeIds,
     isAIHighlightsEnabled,
     toggleAIHighlights,
+    clearAIToolHighlights,
+    clearAICitationHighlights,
+    clearBlastRadius,
     animatedNodes,
   } = useAppState();
   const [hoveredNodeName, setHoveredNodeName] = useState<string | null>(null);
@@ -305,9 +308,13 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle>((_, ref) => {
       <div className="absolute top-4 right-4 z-20">
         <button
           onClick={() => {
-            // If turning off, also clear process highlights
             if (isAIHighlightsEnabled) {
-              setHighlightedNodeIds(new Set());
+              // Turning off — clear AI highlights and selection (preserve user query highlights)
+              clearAIToolHighlights();
+              clearAICitationHighlights();
+              clearBlastRadius();
+              setSelectedNode(null);
+              setSigmaSelectedNode(null);
             }
             toggleAIHighlights();
           }}
